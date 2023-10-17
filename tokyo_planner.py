@@ -228,6 +228,7 @@ def main() -> None:
             label="Enter keyword and find the exact location",
             value='',
             key="keyword",
+            placeholder='E.g. Tokyo Tower'
         )
         # note: everytime a new keyword is entered, selected location will be refreshed
 
@@ -329,7 +330,8 @@ def main() -> None:
                     "day",
                     help="Pick a day",
                     options=WEEK.keys(),
-                    required=True
+                    required=True,
+
                 ),
                 "category": st.column_config.SelectboxColumn(
                     "category",
