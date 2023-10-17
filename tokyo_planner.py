@@ -225,9 +225,9 @@ def main() -> None:
         st.write("⬇️ Search places ⬇️")
         # keyword
         st.text_input(
-            label="Find exact location",
+            label="Enter keyword and find the exact location",
             value='',
-            key="keyword"
+            key="keyword",
         )
         # note: everytime a new keyword is entered, selected location will be refreshed
 
@@ -254,7 +254,7 @@ def main() -> None:
 
     # Part 2 -> Table updated automatically as the exact location is selected:
     with st.chat_message("human"):
-        st.write("⬇️ Edit or remove places ⬇️")
+        st.write("⬇️ Edit or remove schedule ⬇️")
         if st.session_state.get("selected_location", ''):
             if places_beginning.filter(pl.col("place_id") == st.session_state['selected_location'][0]).height == 0:
                 new_entries = pl.DataFrame(

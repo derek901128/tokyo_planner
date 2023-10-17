@@ -1,0 +1,8 @@
+pandas
+googlemaps
+folium
+duckdb
+polars
+streamlit
+streamlit_folium
+python-dotenv
