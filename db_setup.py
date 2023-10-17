@@ -13,7 +13,7 @@ def main():
             lon DOUBLE default 139.7677621491435,
             is_active bool default false,
             day varchar(15) default '',
-            trip_order float default 1,
+            trip_order INTEGER default 1,
             category varchar(20) default ''
         );
     """)
