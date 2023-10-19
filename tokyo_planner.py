@@ -46,6 +46,7 @@ def get_suggestions(
     :param keyword: search key that is entered by the user, which is fed to the gmaps.places_autocomplete()
     :return:a list of dictionary that contains place id, coordinates, name of the place, and addreess
     """
+
     return [
         {
             "place_id": result['place_id'],
@@ -56,6 +57,33 @@ def get_suggestions(
         }
         for result in gmaps.places_autocomplete(keyword)
     ]
+
+
+def update_table(
+        conn:duckdb.DuckDBPyConnection,
+        df: pd.DataFrame
+) -> None:
+    """
+    :param conn: duckdb connection
+    :param df: pandas dataframe that is
+    :return: update the table according to the changes made to the data editor
+    """
+
+    for k, v in st.session_state.places_displayed.items():
+        if len(v) > 0:
+            match k:
+                case 'edited_rows':
+                    row_no = list(v.keys())[0]
+                    col_to_change = list(v[row_no].keys())[0]
+                    df.loc[row_no, col_to_change] = v[row_no][col_to_change]
+                case 'deleted_rows':
+                    row_no = v[0]
+                    df.drop(row_no, inplace=True)
+
+    conn.execute("""
+        drop table if exists t_places;
+        create table t_places as select * from df;
+    """)
 
 
 def add_marker(
@@ -189,21 +217,6 @@ def main() -> None:
     # Connect to database
     conn = duckdb.connect(DB)
 
-    places_beginning = conn.execute("""
-        select  
-            place_id
-            , name
-            , address
-            , lat
-            , lon
-            , is_active
-            , day
-            , trip_order
-            , category
-        from 
-            t_places
-    """).pl()
-
     # Set up map
     m = folium.Map(
         location=TOKYO_CENTRE,
@@ -233,89 +246,64 @@ def main() -> None:
         # note: everytime a new keyword is entered, selected location will be refreshed
 
         # Options
-        if st.session_state["keyword"]:
+        if st.session_state['keyword']:
             with st.expander("See results: "):
                 st.selectbox(
-                    label="hey",
+                    label="",
                     label_visibility="collapsed",
                     index=None,
                     placeholder="Pick the right location",
                     options=(
                         (
-                            s['place_id'],
                             s['place_name'],
                             s['address'],
+                            s['place_id'],
                             s['lat'],
                             s['lon']
                         )
                         for s in get_suggestions(gmaps=gmaps, keyword=st.session_state['keyword'])
                     ),
-                    key="selected_location"
+                    key="selected_location",
+                    on_change=lambda: conn.execute("insert into t_places(name, address, place_id, lat, lon) values (?, ?, ?, ?, ?)",
+                                               st.session_state.selected_location
+                                               ).commit() if st.session_state.selected_location else None
                 )
+
 
     # Part 2 -> Table updated automatically as the exact location is selected:
     with st.chat_message("human"):
         st.write("⬇️ Edit or remove schedule ⬇️")
-        if st.session_state.get("selected_location", ''):
-            if places_beginning.filter(pl.col("place_id") == st.session_state['selected_location'][0]).height == 0:
-                new_entries = pl.DataFrame(
-                    {
-                        "place_id": st.session_state['selected_location'][0],
-                        "name": st.session_state['selected_location'][1],
-                        "address": st.session_state['selected_location'][2],
-                        "lat": st.session_state['selected_location'][3],
-                        "lon": st.session_state['selected_location'][4],
-                        "is_active": True,
-                        "day": "",
-                        "trip_order": 1,
-                        "category": ""
-                    }
-                ).with_columns(
-                    pl.col('trip_order').cast(pl.Int32)
-                )
-
-                new_entries = pl.concat([places_beginning, new_entries], how="vertical")
-
-                conn.execute("""
-                    drop table if exists t_places;
-                    create table t_places as select distinct * from new_entries;
-                """)
-
-        places_after_merge = conn.sql("""
-            select 
-                place_id
-                , name
-                , address
-                , lat
-                , lon
-                , is_active
-                , day
-                , trip_order
-                , category
-            from 
-                t_places
-            order by 
-                day
-                , trip_order
-        """).df()
-
-        places_displayed = st.data_editor(
-            places_after_merge,
+        st.data_editor(
+            data=conn.sql("select * from t_places;").df(),
             num_rows="dynamic",
+            key="places_displayed",
             hide_index=True,
             width=1200,
-            key="places_displayed",
+            on_change=update_table,
+            args=[conn, conn.sql("select * from t_places;").df()],
             column_config={
-                "place_id": st.column_config.TextColumn(
-                    "place_id",
-                    disabled=True
-                ),
                 "name": st.column_config.TextColumn(
                     "name",
                     disabled=True
                 ),
                 "address": st.column_config.TextColumn(
                     "address",
+                    disabled=True
+                ),
+                "day": st.column_config.SelectboxColumn(
+                    "day",
+                    help="Pick a day",
+                    options=WEEK.keys(),
+                    required=True,
+                ),
+                "category": st.column_config.SelectboxColumn(
+                    "category",
+                    help="What kind of place is this",
+                    options=CATEGORY.keys(),
+                    required=True
+                ),
+                "place_id": st.column_config.TextColumn(
+                    "place_id",
                     disabled=True
                 ),
                 "lat": st.column_config.NumberColumn(
@@ -325,19 +313,6 @@ def main() -> None:
                 "lon": st.column_config.NumberColumn(
                     "lon",
                     disabled=True
-                ),
-                "day": st.column_config.SelectboxColumn(
-                    "day",
-                    help="Pick a day",
-                    options=WEEK.keys(),
-                    required=True,
-
-                ),
-                "category": st.column_config.SelectboxColumn(
-                    "category",
-                    help="What kind of place is this",
-                    options=CATEGORY.keys(),
-                    required=True
                 )
             }
         )
@@ -354,7 +329,7 @@ def main() -> None:
                                     , day
                                     , category
                                 from
-                                    places_displayed
+                                    t_places
                                 where
                                     lat is not null
                                     and lon is not null
@@ -379,6 +354,8 @@ def main() -> None:
             width=1000
         )
 
+    df = conn.sql("select * from t_places").df()
+
     # Part 4 -> Generate schedule:
     with st.chat_message("human"):
         st.write("⬇️ Schedule ⬇️")
@@ -389,56 +366,51 @@ def main() -> None:
             make_schedule(
                 conn=conn,
                 day='Monday',
-                df=places_displayed,
+                df=df,
                 gmaps=gmaps
             )
         with tue:
             make_schedule(
                 conn=conn,
                 day='Tuesday',
-                df=places_displayed,
+                df=df,
                 gmaps=gmaps
             )
         with wed:
             make_schedule(
                 conn=conn,
                 day='Wednesday',
-                df=places_displayed,
+                df=df,
                 gmaps=gmaps
             )
         with thur:
             make_schedule(
                 conn=conn,
                 day='Thursday',
-                df=places_displayed,
+                df=df,
                 gmaps=gmaps
             )
         with fri:
             make_schedule(
                 conn=conn,
                 day='Friday',
-                df=places_displayed,
+                df=df,
                 gmaps=gmaps
             )
         with sat:
             make_schedule(
                 conn=conn,
                 day='Saturday',
-                df=places_displayed,
+                df=df,
                 gmaps=gmaps
             )
         with sun:
             make_schedule(
                 conn=conn,
                 day='Sunday',
-                df=places_displayed,
+                df=df,
                 gmaps=gmaps
             )
-
-    conn.execute("""
-        drop table if exists t_places;
-        create table t_places as select * from places_displayed;
-    """)
 
 
 if __name__ == "__main__":
