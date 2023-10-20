@@ -86,6 +86,22 @@ def update_table(
     """)
 
 
+def set_centre(
+        conn: duckdb.DuckDBPyConnection,
+        df: pd.DataFrame
+) -> tuple[float, float]:
+    coordinates = conn.sql("select lat, lon from df where is_active").fetchall()
+    active_cnt = len(coordinates)
+
+    match active_cnt:
+        case 0:
+            return TOKYO_CENTRE
+        case 1:
+            return coordinates[0]
+        case _:
+            return sum([x for x, y in coordinates]) / active_cnt, sum([y for x, y in coordinates]) / active_cnt
+
+
 def add_marker(
     lat: float,
     lon: float,
@@ -350,7 +366,7 @@ def main() -> None:
         st_folium(
             m,
             feature_group_to_add=fg,
-            center=TOKYO_CENTRE,
+            center=set_centre(conn=conn, df=conn.sql("select * from t_places").df()),
             width=1000
         )
 
